@@ -319,7 +319,7 @@ class KavachAccessibilityService : AccessibilityService() {
         commandChannel.close()
 
         // Stage 3: Stop alarm audio & release decoder resources
-        audioPlayer?.stopAlarm()
+        audioPlayer?.shutdown()
 
         // Stage 4: Remove overlay from window manager
         overlayManager?.hideOverlay()

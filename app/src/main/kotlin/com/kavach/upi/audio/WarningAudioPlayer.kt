@@ -7,6 +7,12 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
 
 class WarningAudioPlayer(private val context: Context) {
 
@@ -14,10 +20,108 @@ class WarningAudioPlayer(private val context: Context) {
     private var toneGenerator: ToneGenerator? = null
     private var isToneFallbackActive = false
 
+    private var tts: TextToSpeech? = null
+    private var isTtsInitialized = false
+    private var isAlarmRunning = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val sharedPreferences = context.getSharedPreferences("kavach_settings", Context.MODE_PRIVATE)
+
+    private val warningTextEn = "Attention! Kavach security shield is active. Screen sharing detected during payment. Please disconnect the call immediately to protect your bank account."
+    private val warningTextHi = "ध्यान दें! कवच सुरक्षा कवच सक्रिय है। भुगतान के दौरान स्क्रीन शेयरिंग का पता चला है। कृपया अपने बैंक खाते को सुरक्षित रखने के लिए तुरंत कॉल काट दें।"
+
+    init {
+        initializeTts()
+    }
+
+    private fun initializeTts() {
+        try {
+            tts = TextToSpeech(context) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    isTtsInitialized = true
+                    setupTtsListener()
+                    // If startAlarm was called before initialization completed, start speaking now
+                    if (isAlarmRunning) {
+                        speakCurrentWarning()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun setupTtsListener() {
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            
+            override fun onDone(utteranceId: String?) {
+                if (isAlarmRunning) {
+                    mainHandler.postDelayed({
+                        if (isAlarmRunning) {
+                            speakCurrentWarning()
+                        }
+                    }, 1500) // 1.5s delay before repeating the message
+                }
+            }
+
+            override fun onError(utteranceId: String?) {
+                // If TTS fails during playback, fallback to alarm sound
+                mainHandler.post {
+                    startAlarmFallback()
+                }
+            }
+        })
+    }
+
     /**
-     * Starts playing the warning alarm in a loop.
+     * Starts playing the warning alarm/TTS warning in a loop based on settings.
      */
     fun startAlarm() {
+        if (isAlarmRunning) return
+        isAlarmRunning = true
+
+        val alertType = sharedPreferences.getString("pref_alert_type", "VOICE") ?: "VOICE"
+
+        when (alertType) {
+            "ALARM" -> {
+                startAlarmFallback()
+            }
+            "BOTH" -> {
+                startAlarmFallback()
+                triggerTtsSpeech()
+            }
+            "VOICE" -> {
+                triggerTtsSpeech()
+            }
+        }
+    }
+
+    private fun triggerTtsSpeech() {
+        if (isTtsInitialized) {
+            speakCurrentWarning()
+        } else {
+            // TTS not ready yet, initialize or fallback temporarily
+            initializeTts()
+            startAlarmFallback()
+        }
+    }
+
+    private fun speakCurrentWarning() {
+        val language = sharedPreferences.getString("pref_alert_language", "en") ?: "en"
+        val text = if (language == "hi") warningTextHi else warningTextEn
+        val locale = if (language == "hi") Locale("hi", "IN") else Locale.US
+
+        tts?.let {
+            it.language = locale
+            val params = Bundle().apply {
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "KavachWarningUtterance")
+            }
+            it.speak(text, TextToSpeech.QUEUE_FLUSH, params, "KavachWarningUtterance")
+        }
+    }
+
+    private fun startAlarmFallback() {
         if (mediaPlayer != null || isToneFallbackActive) {
             return // Already playing
         }
@@ -54,8 +158,6 @@ class WarningAudioPlayer(private val context: Context) {
         try {
             toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
             isToneFallbackActive = true
-            // Start a separate thread or rely on periodic start calls.
-            // For ToneGenerator, we play a continuous tone or beep.
             toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -64,11 +166,35 @@ class WarningAudioPlayer(private val context: Context) {
     }
 
     /**
-     * Stops the playback and cleanly releases native resources.
+     * Stops the playback and cleanly stops alarms/TTS.
      */
     fun stopAlarm() {
+        isAlarmRunning = false
+        mainHandler.removeCallbacksAndMessages(null)
+        
+        try {
+            tts?.stop()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         releaseMediaPlayer()
         releaseToneGenerator()
+    }
+
+    /**
+     * Shuts down the TTS engine and releases resources (call in service onDestroy).
+     */
+    fun shutdown() {
+        stopAlarm()
+        try {
+            tts?.shutdown()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            tts = null
+            isTtsInitialized = false
+        }
     }
 
     private fun releaseMediaPlayer() {
@@ -101,3 +227,4 @@ class WarningAudioPlayer(private val context: Context) {
         }
     }
 }
+
