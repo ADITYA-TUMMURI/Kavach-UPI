@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Kavach UPI</string>
+    <string name="accessibility_service_label">Kavach-UPI Security Shield</string>
+    <string name="accessibility_service_description">Kavach-UPI runs in the background to detect potential screen-sharing and remote control apps during financial transactions to prevent fraud.</string>
+</resources>
