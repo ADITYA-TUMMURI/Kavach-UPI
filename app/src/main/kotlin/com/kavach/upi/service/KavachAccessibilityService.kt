@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import com.kavach.upi.audio.WarningAudioPlayer
 import com.kavach.upi.detection.ThreatSignatureStore
+import com.kavach.upi.detection.UpiTargetRegistry
+import com.kavach.upi.detection.PaymentScreenVerifier
 import com.kavach.upi.overlay.ThreatOverlayManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 class KavachAccessibilityService : AccessibilityService() {
 
@@ -22,7 +25,21 @@ class KavachAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: ThreatOverlayManager
     private lateinit var audioPlayer: WarningAudioPlayer
 
-    private val pollingIntervalMs = 2000L
+    // State tracking flags
+    private val isUpiContextActive = AtomicBoolean(false)
+    private var lastProcessedPackage: String? = null
+    private var lastProcessedTime: Long = 0
+
+    // Consecutives clean checks needed for threat clearance to prevent flicker
+    private var consecutiveCleanChecks = 0
+
+    // System package names to ignore
+    private val systemPackages = setOf(
+        "com.android.systemui",
+        "com.google.android.inputmethod.latin",
+        "android",
+        "com.android.launcher3"
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -33,16 +50,37 @@ class KavachAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         
-        // Start continuous background polling fallback loop
+        // Start continuous background dual-gear polling fallback loop
         startPollingThreats()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val packageName = event?.packageName?.toString() ?: return
+        if (event == null) return
 
-        // Dispatch threat assessment to background thread
+        // 1. Event Type Gate
+        val eventType = event.eventType
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            return
+        }
+
+        // 2. Safe Package Name Extraction
+        val packageName = event.packageName?.toString() ?: return
+        if (packageName.isBlank() || systemPackages.contains(packageName)) {
+            return
+        }
+
+        // 3. Debounce Guard (500ms)
+        val currentTime = System.currentTimeMillis()
+        if (packageName == lastProcessedPackage && (currentTime - lastProcessedTime) < 500) {
+            return
+        }
+        lastProcessedPackage = packageName
+        lastProcessedTime = currentTime
+
+        // 4. Offload to background coroutine scope
         serviceScope.launch {
-            assessThreat(packageName)
+            assessContextAndThreats(packageName, event)
         }
     }
 
@@ -51,45 +89,119 @@ class KavachAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Periodically inspects active windows to catch threats running in the background.
+     * Dual-Gear background polling loop.
+     * Passive Gear: Polls every 3000ms.
+     * Aggressive Gear: Polls every 1000ms when a transaction is active, looking for screen-sharing/recording apps.
      */
     private fun startPollingThreats() {
         serviceScope.launch {
             while (serviceJob.isActive) {
                 ensureActive()
-                delay(pollingIntervalMs)
 
-                // Retrieve all interactive window layers across the screen
-                val currentWindows = windows
+                val isActiveContext = isUpiContextActive.get()
+                val interval = if (isActiveContext) 1000L else 3000L
+                delay(interval)
+
+                // Sweep the window hierarchy
                 var threatFound = false
+                val currentWindows = windows
 
                 for (window in currentWindows) {
                     val rootNode = window.root ?: continue
                     val pkgName = rootNode.packageName?.toString()
+                    
+                    // If target UPI app is running but we missed the event-driven check, enable active context
+                    if (UpiTargetRegistry.isUpiTarget(pkgName)) {
+                        if (PaymentScreenVerifier.isPaymentScreenActive(rootNode)) {
+                            isUpiContextActive.compareAndSet(false, true)
+                        }
+                    }
+
                     if (ThreatSignatureStore.isThreatPackage(pkgName)) {
                         threatFound = true
-                        break
                     }
+                    rootNode.recycle()
                 }
 
-                if (threatFound) {
-                    escalateThreat()
-                } else if (!isAnyEventThreatActive()) {
-                    // Only lower threat escalation if no event-driven threat remains
+                // If UPI transaction context is active, evaluate threats
+                if (isUpiContextActive.get()) {
+                    if (threatFound) {
+                        consecutiveCleanChecks = 0
+                        escalateThreat()
+                    } else {
+                        consecutiveCleanChecks++
+                        // Ensure overlay is only removed if clean for two consecutive ticks
+                        if (consecutiveCleanChecks >= 2) {
+                            deescalateThreat()
+                        }
+                    }
+                } else {
+                    // No active transaction context, hide shield and alarm unconditionally
                     deescalateThreat()
+                    consecutiveCleanChecks = 0
                 }
             }
         }
     }
 
     /**
-     * Checks if a package name is a threat and triggers UI overlays accordingly.
+     * Event-driven threat assessment checks.
      */
-    private suspend fun assessThreat(packageName: String) {
-        if (ThreatSignatureStore.isThreatPackage(packageName)) {
-            escalateThreat()
+    private suspend fun assessContextAndThreats(packageName: String, event: AccessibilityEvent) {
+        val isUpiTarget = UpiTargetRegistry.isUpiTarget(packageName)
+
+        if (isUpiTarget) {
+            val root = event.source ?: rootInActiveWindow
+            val isPaymentScreen = PaymentScreenVerifier.isPaymentScreenActive(root)
+            root?.recycle()
+
+            val previousContext = isUpiContextActive.getAndSet(isPaymentScreen)
+            
+            // If transitioned to active transaction context, run an immediate one-shot scan
+            if (!previousContext && isPaymentScreen) {
+                runOneShotThreatScan()
+            }
+        } else if (ThreatSignatureStore.isThreatPackage(packageName)) {
+            // A threat application moved to foreground
+            if (isUpiContextActive.get()) {
+                consecutiveCleanChecks = 0
+                escalateThreat()
+            }
         } else {
-            deescalateThreat()
+            // Not a UPI app and not a threat
+            // If the user navigated away from the UPI app entirely
+            val activeWindows = windows
+            var isUpiStillVisible = false
+            for (window in activeWindows) {
+                val rootNode = window.root ?: continue
+                val pkg = rootNode.packageName?.toString()
+                if (UpiTargetRegistry.isUpiTarget(pkg) && PaymentScreenVerifier.isPaymentScreenActive(rootNode)) {
+                    isUpiStillVisible = true
+                }
+                rootNode.recycle()
+            }
+            isUpiContextActive.set(isUpiStillVisible)
+        }
+    }
+
+    /**
+     * Quick threat scan triggered immediately on transitioning into a UPI context.
+     */
+    private suspend fun runOneShotThreatScan() {
+        val currentWindows = windows
+        var threatFound = false
+        for (window in currentWindows) {
+            val rootNode = window.root ?: continue
+            val pkg = rootNode.packageName?.toString()
+            if (ThreatSignatureStore.isThreatPackage(pkg)) {
+                threatFound = true
+            }
+            rootNode.recycle()
+        }
+
+        if (threatFound) {
+            consecutiveCleanChecks = 0
+            escalateThreat()
         }
     }
 
@@ -115,20 +227,6 @@ class KavachAccessibilityService : AccessibilityService() {
                 audioPlayer.stopAlarm()
             }
         }
-    }
-
-    /**
-     * Helper to verify if any running window context matches signature store.
-     */
-    private fun isAnyEventThreatActive(): Boolean {
-        val currentWindows = windows
-        for (window in currentWindows) {
-            val rootNode = window.root ?: continue
-            if (ThreatSignatureStore.isThreatPackage(rootNode.packageName?.toString())) {
-                return true
-            }
-        }
-        return false
     }
 
     override fun onDestroy() {
