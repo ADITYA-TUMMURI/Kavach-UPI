@@ -35,7 +35,7 @@ object PaymentScreenVerifier {
         return traverseNode(rootNode, 0, counter)
     }
 
-    private fun traverseNode(node: AccessibilityNodeInfo, depth: Int, counter: intArrayOf): Boolean {
+    private fun traverseNode(node: AccessibilityNodeInfo, depth: Int, counter: IntArray): Boolean {
         if (depth > MAX_DEPTH) return false
         counter[0]++
         if (counter[0] > MAX_NODE_LIMIT) return false

@@ -25,4 +25,11 @@ object ThreatSignatureStore {
         val normalized = packageName.lowercase().trim()
         return threatPackages.any { threat -> normalized.contains(threat) }
     }
+
+    /**
+     * Exposes the raw list of target threat packages.
+     */
+    fun getThreatPackages(): Set<String> {
+        return threatPackages
+    }
 }
