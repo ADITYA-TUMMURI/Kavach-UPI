@@ -21,11 +21,21 @@ No cloud. No internet. Entirely on-device.
 ## Core Features
 
 - **Active Window Tree Parsing** — Performs recursive depth-first traversal of the live `AccessibilityNodeInfo` hierarchy to confirm when a user is on a financial transaction screen (detecting UPI PIN fields, payment buttons, and currency markers).
-- **Dual-Gear Background Polling** — Optimized background processing that shifts between **1-second aggressive polling** during active payment contexts and **3-second passive polling** to conserve battery when no financial app is in the foreground.
+- **Dual-Gear Background Polling** — Optimized background processing that shifts between **1-second (1000 ms) aggressive polling** during active payment contexts and **3-second (3000 ms) passive polling** to conserve battery when no financial app is in the foreground.
 - **Opaque Security Overlay** — Programmatic, full-screen overlay deployed via the `SYSTEM_ALERT_WINDOW` API that freezes all remote touch inputs, rendering screen-sharing tools unable to interact with the device.
 - **Localized Threat Audio** — Instant looping audio warning played over the system alarm stream to alert the user audibly, with automatic fallback to a tone generator if the device's default alarm URI is unavailable.
 - **Background Process Scanning** — Targeted `PackageManager` and `ActivityManager` queries to detect threat apps running as invisible background services, even when they hold no visible window.
-- **Media-Projection Detection** — Monitors for active virtual displays and intercepts notification metadata to identify live screen-capture or casting sessions initiated by threat applications.
+- **Media-Projection Detection (API 29+)** — Intercepts foreground service configuration metadata through `UsageStatsManager` `UsageEvents` on API 29+ to identify running services flagged with `FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION`, paired with a virtual display presentation category monitor and notification intent hooks.
+
+---
+
+## Security Boundaries & Permissions
+
+To operate securely and protect users at critical boundaries without sending any data off-device, **Kavach-UPI** requests the following Android permissions:
+
+1. **`android.permission.BIND_ACCESSIBILITY_SERVICE`** — Required to register the system accessibility service (`KavachAccessibilityService`). This allows the app to perform lock-free window-state checks and detect active UPI transaction screens.
+2. **`android.permission.SYSTEM_ALERT_WINDOW`** — Required to deploy the opaque, non-pass-through security shield (`ThreatOverlayManager`) over payment screens, blocking malicious remote touch commands.
+3. **`android.permission.PACKAGE_USAGE_STATS`** — Required to access the system `UsageStatsManager` and query active `UsageEvents` (on API 29+) to verify if any running background services are configured for media projection/screen mirroring.
 
 ---
 
