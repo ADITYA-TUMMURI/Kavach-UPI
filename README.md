@@ -1,81 +1,26 @@
 # 🛡️ Kavach-UPI
 
-**An on-device security shield that leverages the Android Accessibility API to detect active screen-sharing apps during financial transactions. When a threat is detected, it instantly deploys an opaque full-screen overlay to block remote touch inputs and plays a localized audio warning to stop social engineering scams.**
+An on-device, edge-computed security shield designed to protect users against remote-access financial fraud and social engineering scams during live transactions.
 
-> **HACKFEST'26 Submission** · Licensed under the **MIT License**
+## 📌 The Vulnerability & Solution
+Standard UPI and banking applications remain completely blind to underlying Android OS-level media casting hooks, allowing malicious threat actors to capture screens and inject overlay touch scripts remotely. 
 
----
+Kavach-UPI monitors active system window contexts. When a screen-sharing signature or an unverified virtual display process is validated concurrently with a live financial window, the app intercepts the vector:
+* **Forcefully drops** a full-screen, opaque glassmorphism layout to block touch inputs.
+* **Broadcasts bilingual audio alerts** (English/Hindi) instructing immediate network disconnection.
 
-## The Problem
+$$\text{Overlay State} = \begin{cases} \text{Active (Block Input)} & \text{if UPI App Open} \land \text{Screen Share Active} \\ \text{Inactive (Pass Input)} & \text{otherwise} \end{cases}$$
 
-Sophisticated social engineering scams trick users into installing remote-access tools — such as AnyDesk, TeamViewer, or RustDesk — under the guise of customer support. Once installed, these tools give attackers **real-time visibility** into the victim's screen, enabling them to view OTPs, intercept UPI PINs, and bypass payment app protections while the user is unaware their screen is being mirrored.
+## ⚙️ Architecture & Implementation Gaps Patched
+* **Dual-Gear Background Polling Loop:** Alternates frequency profiles automatically ($1000\text{ ms}$ aggressive payment tracking / $3000\text{ ms}$ relaxed idling) to preserve hardware resources.
+* **API 29+ Media Projection Subsystem:** Intercepts `UsageEvents` history timelines on Android 10+ devices to catch `FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION` flags instantly.
+* **Thread-Safe Synchronization:** Atomic evaluations (`virtualDisplayThreatDetected`) link the hardware process scanner with the active accessibility node verifier.
 
-## The Solution
+## 🔐 System Permissions & Onboarding Requirements
+To implement low-latency OS-level protection loops without network dependencies, Kavach-UPI requires explicit local validation for:
+1. `BIND_ACCESSIBILITY_SERVICE` — Parses active view-tree layers dynamically to identify vulnerable states.
+2. `SYSTEM_ALERT_WINDOW` — Spawns the programmatic input-blocking layer.
+3. `PACKAGE_USAGE_STATS` — Inspects the system foreground configuration timeline.
 
-**Kavach-UPI** acts as an active, on-device security shield. It runs a **dual-gear background coroutine service** that continuously intercepts window states, scans for known threat applications across the OS process table, and — the moment a user enters a UPI payment screen while a screen-sharing tool is active — **instantly blocks all unauthorized remote input** using a system-level opaque overlay and an audible safety warning.
-
-No cloud. No internet. Entirely on-device.
-
----
-
-## Core Features
-
-- **Active Window Tree Parsing** — Performs recursive depth-first traversal of the live `AccessibilityNodeInfo` hierarchy to confirm when a user is on a financial transaction screen (detecting UPI PIN fields, payment buttons, and currency markers).
-- **Dual-Gear Background Polling** — Optimized background processing that shifts between **1-second (1000 ms) aggressive polling** during active payment contexts and **3-second (3000 ms) passive polling** to conserve battery when no financial app is in the foreground.
-- **Opaque Security Overlay** — Programmatic, full-screen overlay deployed via the `SYSTEM_ALERT_WINDOW` API that freezes all remote touch inputs, rendering screen-sharing tools unable to interact with the device.
-- **Localized Threat Audio** — Instant looping audio warning played over the system alarm stream to alert the user audibly, with automatic fallback to a tone generator if the device's default alarm URI is unavailable.
-- **Background Process Scanning** — Targeted `PackageManager` and `ActivityManager` queries to detect threat apps running as invisible background services, even when they hold no visible window.
-- **Media-Projection Detection (API 29+)** — Intercepts foreground service configuration metadata through `UsageStatsManager` `UsageEvents` on API 29+ to identify running services flagged with `FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION`, paired with a virtual display presentation category monitor and notification intent hooks.
-
----
-
-## Security Boundaries & Permissions
-
-To operate securely and protect users at critical boundaries without sending any data off-device, **Kavach-UPI** requests the following Android permissions:
-
-1. **`android.permission.BIND_ACCESSIBILITY_SERVICE`** — Required to register the system accessibility service (`KavachAccessibilityService`). This allows the app to perform lock-free window-state checks and detect active UPI transaction screens.
-2. **`android.permission.SYSTEM_ALERT_WINDOW`** — Required to deploy the opaque, non-pass-through security shield (`ThreatOverlayManager`) over payment screens, blocking malicious remote touch commands.
-3. **`android.permission.PACKAGE_USAGE_STATS`** — Required to access the system `UsageStatsManager` and query active `UsageEvents` (on API 29+) to verify if any running background services are configured for media projection/screen mirroring.
-
----
-
-## Technical Stack
-
-| Layer | Technology |
-|---|---|
-| **Language** | Kotlin (Android Native) |
-| **API Target** | Android SDK 34 (Minimum SDK 26 / Android 8.0 Oreo) |
-| **Core Frameworks** | Android Accessibility API, kotlinx-coroutines |
-| **State Management** | AtomicBoolean flag array with lock-free merge evaluation |
-| **Data Caching** | SharedPreferences (persistent state recovery across process death) |
-| **UI Orchestration** | Conflated Kotlin Channel command pipeline (background → main thread) |
-| **Build System** | Gradle Kotlin DSL with Version Catalog |
-
----
-
-## Project Structure
-
-```
-app/src/main/kotlin/com/kavach/upi/
-├── detection/
-│   ├── ThreatSignatureStore        # Known threat package registry
-│   ├── UpiTargetRegistry           # Financial/UPI app identifier set
-│   ├── PaymentScreenVerifier       # Recursive DFS node-tree payment confirmation
-│   ├── BackgroundProcessScanner    # OS process table & virtual display inspector
-│   └── MediaProjectionDetector     # Notification & UsageStats projection checker
-├── service/
-│   ├── KavachAccessibilityService  # Core service — lifecycle, polling, event handling
-│   ├── ThreatStateEvaluator        # Four-channel atomic merge + state machine
-│   └── UICommand                   # Sealed command vocabulary for the UI channel
-├── overlay/
-│   └── ThreatOverlayManager        # WindowManager overlay deployment & dismissal
-├── audio/
-│   └── WarningAudioPlayer          # MediaPlayer loop + ToneGenerator fallback
-└── MainActivity                    # Permission onboarding interface
-```
-
----
-
-## License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+## ⚖️ License
+Distributed under the **MIT License**. Completely friction-free open-source evaluation.
