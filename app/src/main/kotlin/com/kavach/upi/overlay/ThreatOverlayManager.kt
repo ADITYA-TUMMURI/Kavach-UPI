@@ -114,7 +114,7 @@ class ThreatOverlayManager(private val context: Context) {
             setTextColor(Color.parseColor("#E0E0E0")) // Off-white
             textSize = 15f
             gravity = Gravity.CENTER
-            lineSpacingMultiplier = 1.2f
+            setLineSpacing(0f, 1.2f)
         }
         cardLayout.addView(descText)
 

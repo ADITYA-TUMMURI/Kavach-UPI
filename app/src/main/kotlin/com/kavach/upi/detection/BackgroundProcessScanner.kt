@@ -74,7 +74,7 @@ class BackgroundProcessScanner(private val context: Context) {
     /**
      * Checks display manager for active virtual or cast displays.
      */
-    private fun isVirtualDisplayActive(): Boolean {
+    fun isVirtualDisplayActive(): Boolean {
         return try {
             val displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
             displays.isNotEmpty()

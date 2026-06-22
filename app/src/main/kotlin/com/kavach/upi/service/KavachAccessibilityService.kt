@@ -135,18 +135,15 @@ class KavachAccessibilityService : AccessibilityService() {
                             persistShieldState("SHIELDED")
                         }
                     }
-                    is UICommand.DismissOverlay -> {
-                        // Managed inside StopAlarm sequence to enforce 200ms audio-stop-to-dismiss delay
-                    }
-                    is UICommand.StartAlarm -> {
-                        audioPlayer?.startAlarm()
-                    }
-                    is UICommand.StopAlarm -> {
+                    is UICommand.DismissOverlay, is UICommand.StopAlarm -> {
                         audioPlayer?.stopAlarm()
                         // Wait 200ms wind-down gap before removing view
                         delay(200)
                         overlayManager?.hideOverlay()
                         persistShieldState("IDLE")
+                    }
+                    is UICommand.StartAlarm -> {
+                        audioPlayer?.startAlarm()
                     }
                     is UICommand.FullTeardown -> {
                         // Handled inside onDestroy
@@ -199,6 +196,7 @@ class KavachAccessibilityService : AccessibilityService() {
                 // 2. Scan background services and virtual displays
                 val processThreatFound = scanner.isThreatActive()
                 evaluator.backgroundServiceThreatDetected.set(processThreatFound)
+                evaluator.virtualDisplayThreatDetected.set(scanner.isVirtualDisplayActive())
 
                 // 3. Evaluate combined results if UPI context is active
                 if (evaluator.isUpiContextActive()) {

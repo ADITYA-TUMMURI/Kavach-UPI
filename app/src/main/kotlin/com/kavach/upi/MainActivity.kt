@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -36,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusSubtext: TextView
     private lateinit var overlayBtn: Button
     private lateinit var accessibilityBtn: Button
+    private lateinit var usageBtn: Button
 
     // Language Toggle Buttons
     private lateinit var btnLangEn: Button
@@ -165,6 +167,25 @@ class MainActivity : AppCompatActivity() {
         }
         cardA11y.addView(accessibilityBtn)
         rootLayout.addView(cardA11y)
+
+        // Permission Card 3: Usage Access
+        val cardUsage = createCard(
+            "Usage Stats Access",
+            "Required to check active media projection and screen mirroring tools on newer Android versions. Locate Kavach-UPI in the list and allow usage access to complete the security configuration."
+        )
+        usageBtn = Button(this).apply {
+            text = "Grant Usage Access"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(32, 16, 32, 16)
+            setOnClickListener {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                startActivity(intent)
+            }
+        }
+        cardUsage.addView(usageBtn)
+        rootLayout.addView(cardUsage)
 
         // Section Title: SETTINGS
         val settingsTitle = TextView(this).apply {
@@ -300,15 +321,40 @@ class MainActivity : AppCompatActivity() {
         updateStatusUi()
     }
 
+    private fun isUsageAccessGranted(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager ?: return false
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(
+                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        }
+        return mode == android.app.AppOpsManager.MODE_ALLOWED
+    }
+
     private fun updateStatusUi() {
         val overlayOk = Settings.canDrawOverlays(this)
         val a11yOk = isAccessibilityServiceEnabled()
+        val usageOk = isUsageAccessGranted()
 
-        if (overlayOk && a11yOk) {
+        if (overlayOk && a11yOk && usageOk) {
             statusCircle.background = createCardBackground(Color.parseColor("#152ECC71"), Color.parseColor("#402ECC71"))
             statusText.text = "🛡️ SHIELD ACTIVE & SECURE"
             statusText.setTextColor(Color.parseColor("#2ECC71"))
             statusSubtext.text = "Dual-gear threat scanner is actively monitoring background processes."
+        } else if (overlayOk && a11yOk && !usageOk) {
+            statusCircle.background = createCardBackground(Color.parseColor("#15F39C12"), Color.parseColor("#40F39C12"))
+            statusText.text = "⚠️ EXTRA SETUP REQUIRED"
+            statusText.setTextColor(Color.parseColor("#F39C12"))
+            statusSubtext.text = "Usage Access permission missing. Enable it to detect media-projection attacks."
         } else {
             statusCircle.background = createCardBackground(Color.parseColor("#15F39C12"), Color.parseColor("#40F39C12"))
             statusText.text = "⚠️ SETUP REQUIRED"
@@ -336,6 +382,17 @@ class MainActivity : AppCompatActivity() {
             accessibilityBtn.text = "Enable Service"
             accessibilityBtn.background = createButtonBackground(Color.parseColor("#2980B9"), Color.parseColor("#3498DB"))
             accessibilityBtn.isEnabled = true
+        }
+
+        // Update Button usage stats status
+        if (usageOk) {
+            usageBtn.text = "Permission Granted"
+            usageBtn.background = createCardBackground(Color.parseColor("#202ECC71"), Color.parseColor("#2ECC71"))
+            usageBtn.isEnabled = false
+        } else {
+            usageBtn.text = "Grant Usage Access"
+            usageBtn.background = createButtonBackground(Color.parseColor("#2980B9"), Color.parseColor("#3498DB"))
+            usageBtn.isEnabled = true
         }
     }
 
