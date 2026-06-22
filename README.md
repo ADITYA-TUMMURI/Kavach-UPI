@@ -39,7 +39,7 @@ When a foreground window change occurs, the service executes a resource-constrai
 
 The execution states are evaluated locally using a thread-safe atomic merging sequence that updates the system state engine sequentially on every polling cycle:
 
-$$\text{Overlay State} = \begin{cases} \text{Active (Block Input)} & \text{if Context}_{\text{UPI}} = \text{True} \land (\text{Projection}_{\text{Media}} = \text{True} \lor \text{Display}_{\text{Virtual}} = \text{True}) \\ \text{Inactive (Pass Input)} & \text{otherwise} \end{cases}$$
+$$\text{Overlay State} = \begin{cases} \text{Active (Block Input)} & \text{if } C_{\text{UPI}} \land (P_{\text{Media}} \lor D_{\text{Virtual}}) \\ \text{Inactive (Pass Input)} & \text{otherwise} \end{cases}$$
 
 ### Anti-Flicker Hysteresis Stabilization
 To maintain absolute stability during rapid activity redraws, the system integrates a 2-cycle hysteresis rule. The threat state engine must record exactly two consecutive clean, risk-free polling cycles before dropping an active shield, completely eliminating overlay flickering or race conditions.
